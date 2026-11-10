@@ -1,4 +1,4 @@
-# claude-code-sshare
+# claude-code-session-share
 
 Share a live Claude Code TUI session as a public web link. The browser renders the real terminal with ghostty-web. Read links watch. Edit links also get a floating prompt box whose messages get queued into the session.
 
@@ -10,13 +10,13 @@ herdr pane --observe--> bridge (local, bun) --wss--> relay (exe.dev VM) --wss-->
 ```
 
 - `plugin/`: the Claude Code mod (function hooks plugin).
-  - `hooks/register.tsx`: `/sshare` command, the `AbovePrompt` band (a dim "sharing session" line, or the approve prompt when a guest message waits), status line, toasts. Spawns the bridge with `$.process.spawn` and reads its stdout.
+  - `hooks/register.tsx`: `/share-session` command, the `AbovePrompt` band (a dim "sharing session" line, or the approve prompt when a guest message waits), status line, toasts. Spawns the bridge with `$.process.spawn` and reads its stdout.
   - `bridge/bridge.ts`: a Bun process. Runs `herdr terminal session observe <pane>`, pushes frames to the relay, holds the link tokens, and serves a control API on a unix socket.
-  - `types/index.d.ts`: the `$.state` contract (`sshare.share`, `sshare.pending`). The validator wants it self-contained, so it can't re-export anything.
+  - `types/index.d.ts`: the `$.state` contract (`session-share.share`, `session-share.pending`). The validator wants it self-contained, so it can't re-export anything.
   - `types/protocol.d.ts`: every wire message between the four pieces. The mod, the bridge, the relay and the test all `import type` from it. Type-only imports vanish at runtime, which is why the relay deploys without it.
 - `relay/`: a Bun server (`server.ts`) plus the viewer page (`viewer.html` + `viewer.js`). Serves ghostty-web from `node_modules/ghostty-web/dist` under `/vendor/`. The wasm is inlined in the JS. The page has no inline script, so the CSP has no `'unsafe-inline'` for scripts.
 - `test/e2e.ts`: end-to-end test. Starts a local relay on a random port with a throwaway secret, runs the real bridge on the current herdr pane, and drives fake viewers.
-- `.claude-plugin/marketplace.json`: makes the repo installable with `/plugin install sshare --marketplace jliocsar/claude-code-sshare`.
+- `.claude-plugin/marketplace.json`: makes the repo installable with `/plugin install session-share --marketplace jliocsar/claude-code-session-share`.
 - Root `package.json`: dev tooling only (biome, typescript, `@types/bun`). `relay/package.json` is what the VM installs.
 - `tmp/`: gitignored scratch (screenshots, the unpacked ghostty-web package, handoffs).
 
@@ -42,7 +42,7 @@ Bridge stdout to the mod (JSON lines):
 - `prompt {text, viewer, approve}`
 - `fatal {why}`
 
-Mod to bridge: HTTP over the unix socket `$XDG_RUNTIME_DIR/sshare-<pid>.sock`, via `$.http.fetch(url, { socketPath })`. Every route is a POST with a JSON body.
+Mod to bridge: HTTP over the unix socket `$XDG_RUNTIME_DIR/session-share-<pid>.sock`, via `$.http.fetch(url, { socketPath })`. Every route is a POST with a JSON body.
 
 - `/link {mode, ttlMs, approve}` returns `{mode, approve, url, expires}`.
 - `/links`
@@ -73,18 +73,18 @@ Viewer and relay talk over `wss://<relay>/ws/view?sid=<sid>`.
   - more than 300 cached delta frames triggers `resync`
   - a session is dropped 10 min after its host disconnects
 - TTL is clamped to between 1m and 7d. The default is 2h.
-- Edit links default to `--mode approve`: each guest message waits in a band above the prompt. Approve with `y`, reject with `n`, approve all with `a`, after ctrl+x tab focuses the band. `/sshare approve|reject [all]` does the same. `--mode auto` submits right away.
-- Link tokens never go on screen, since viewers watch it. `/sshare read|edit` copies the full link to the clipboard (`$.ui.copy`) and prints it without its `#t=` part. It prints it whole, with a warning, only when the copy fails. `/sshare list` and the band show token-free URLs.
-- Guest prompts go in framed as `[sshare guest via edit link]` (not `asUser`), so the model knows they didn't come from the owner.
+- Edit links default to `--mode approve`: each guest message waits in a band above the prompt. Approve with `y`, reject with `n`, approve all with `a`, after ctrl+x tab focuses the band. `/share-session approve|reject [all]` does the same. `--mode auto` submits right away.
+- Link tokens never go on screen, since viewers watch it. `/share-session read|edit` copies the full link to the clipboard (`$.ui.copy`) and prints it without its `#t=` part. It prints it whole, with a warning, only when the copy fails. `/share-session list` and the band show token-free URLs.
+- Guest prompts go in framed as `[session-share guest via edit link]` (not `asUser`), so the model knows they didn't come from the owner.
 
 ## Infra
 
-- Relay host: the exe.dev VM `sshare`, at https://sshare.exe.xyz, public proxy on port 8000.
-  - The code lives in `~/relay` on the VM. `~/relay/.env` holds `SSHARE_SECRET` and `PORT`.
+- Relay host: the exe.dev VM `sshare`, at https://sshare.exe.xyz, public proxy on port 8000. The host, VM and systemd unit kept the old name, so links already shared still work.
+  - The code lives in `~/relay` on the VM. `~/relay/.env` holds `SESSION_SHARE_SECRET` and `PORT`. Until the relay is redeployed after the rename, it still says `SSHARE_SECRET`: rename the key in the same deploy.
   - It runs as the systemd unit `sshare-relay` with Bun at `~/.bun/bin/bun`.
   - `/` answers `418 {"ok":"you're a teapot"}` on purpose.
-- Local secret: `~/.config/sshare/secret` (chmod 600). It must match the relay's `SSHARE_SECRET`. Never commit it.
-- `SSHARE_RELAY` overrides the default relay URL. `SSHARE_SECRET_FILE` overrides the secret path.
+- Local secret: `~/.config/session-share/secret` (chmod 600). It must match the relay's `SESSION_SHARE_SECRET`. Never commit it.
+- `SESSION_SHARE_RELAY` overrides the default relay URL. `SESSION_SHARE_SECRET_FILE` overrides the secret path.
 
 Deploy the relay:
 
@@ -97,13 +97,13 @@ If `package.json` changed, run `~/.bun/bin/bun install` in `~/relay` on the VM.
 
 ## Developing the mod
 
-- There are two copies. `plugin/` is the repo copy. The session loads the dev-mods copy, at `~/.claude/dev-mods/<session-id>/sshare/` (it was `06d17896-8cde-428c-ab86-1f96aaf13fcf` when this was built). Edit one, then sync: `rsync -a --exclude .claude-plugin/types plugin/ ~/.claude/dev-mods/<session-id>/sshare/`, or the reverse. Dev-mods hot-reload when the turn ends.
+- There are two copies. `plugin/` is the repo copy. The session loads the dev-mods copy, at `~/.claude/dev-mods/<session-id>/session-share/` (it was `06d17896-8cde-428c-ab86-1f96aaf13fcf` when this was built). Edit one, then sync: `rsync -a --exclude .claude-plugin/types plugin/ ~/.claude/dev-mods/<session-id>/session-share/`, or the reverse. Dev-mods hot-reload when the turn ends.
 - Tooling, from the repo root after `bun install` (and `bun install` in `relay/` for the test):
   - `bun run lint`: biome (lint + format check; `bun run fix` writes). Style: 2 spaces, single quotes, no semicolons, 120 columns.
   - `bun run typecheck`: `tsc -p .` (relay, bridge, test, with bun types) and `tsc -p plugin` (the mod).
   - `bun run check`: lint + typecheck + `claude plugin validate plugin`.
   - `bun run test`: the e2e test. Run it inside herdr.
-- `tsc -p plugin` needs `plugin/.claude-plugin/types/`, which the engine writes into the loaded copy only. Copy it over: `rsync -a ~/.claude/dev-mods/<session-id>/sshare/.claude-plugin/types plugin/.claude-plugin/`. It's gitignored.
+- `tsc -p plugin` needs `plugin/.claude-plugin/types/`, which the engine writes into the loaded copy only. Copy it over: `rsync -a ~/.claude/dev-mods/<session-id>/session-share/.claude-plugin/types plugin/.claude-plugin/`. It's gitignored.
 - Don't run `biome migrate`: on 2.6 it rewrote `rules.recommended: true` to `preset: "none"`, which silently turns every rule off. The config uses `preset: "recommended"`.
 - Mod API rules learned the hard way:
   - A function that receives `$` must be a top-level function declaration, or the validator refuses it. Helpers live at module top level, not inside `register`.
@@ -111,7 +111,7 @@ If `package.json` changed, run `~/.bun/bin/bun install` in `~/relay` on the VM.
   - `$.process.spawn`'s `input` is a one-shot string. That's why mod-to-bridge control goes over the unix socket instead of stdin.
   - Module variables reset on reload, and a reload kills the spawned bridge. `session.start` resets the state atoms.
   - Band `Button` hotkeys only work while the band has focus (ctrl+x tab or a click).
-  - The command is registered `immediate: true`, so `/sshare` runs mid-turn.
+  - The command is registered `immediate: true`, so `/share-session` runs mid-turn.
   - The contract (`types/index.d.ts`) can't import or re-export. Other types come from `types/protocol.d.ts` directly.
   - `$.prompt.submit` settles when the turn runs, so the mod doesn't await it before acking the guest.
 - The e2e test covers: link defaults and TTL clamp, the page's CSP, late-join frames, bad tokens and unknown sessions (4003), viewer counts (one update per kick), read links refused, approve vs auto prompts, the pending ack, rate limiting, revoke and stop. It doesn't drive the mod itself (the band, `$.prompt.submit`).
@@ -119,6 +119,6 @@ If `package.json` changed, run `~/.bun/bin/bun install` in `~/relay` on the VM.
 
 ## Known gaps
 
-- The approve band hasn't been seen live yet. `/sshare edit` in auto mode was verified end to end.
+- The approve band hasn't been seen live yet. `/share-session edit` in auto mode was verified end to end.
 - The viewer scales the terminal to fit and doesn't reflow it. On small screens the text gets tiny.
 - Relay sessions are in memory only.

@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-sshare",
+  "name": "claude-code-session-share",
   "private": true,
   "type": "module",
   "scripts": {

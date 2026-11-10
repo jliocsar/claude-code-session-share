@@ -11,18 +11,23 @@ const PANE = process.env.HERDR_PANE_ID
 if (!PANE) throw new Error('run this inside a herdr pane')
 
 const secret = randomBytes(32).toString('hex')
-const dir = mkdtempSync(join(tmpdir(), 'sshare-e2e-'))
+const dir = mkdtempSync(join(tmpdir(), 'session-share-e2e-'))
 writeFileSync(join(dir, 'secret'), secret, { mode: 0o600 })
 const port = 20_000 + Math.floor(Math.random() * 20_000)
 const relayUrl = `http://localhost:${port}`
 
 const relay = Bun.spawn(['bun', join(ROOT, 'relay/server.ts')], {
-  env: { ...process.env, SSHARE_SECRET: secret, PORT: String(port) },
+  env: { ...process.env, SESSION_SHARE_SECRET: secret, PORT: String(port) },
   stdout: 'pipe',
   stderr: 'inherit',
 })
 const bridge = Bun.spawn(['bun', join(ROOT, 'plugin/bridge/bridge.ts')], {
-  env: { ...process.env, SSHARE_PANE: PANE, SSHARE_RELAY: relayUrl, SSHARE_SECRET_FILE: join(dir, 'secret') },
+  env: {
+    ...process.env,
+    SESSION_SHARE_PANE: PANE,
+    SESSION_SHARE_RELAY: relayUrl,
+    SESSION_SHARE_SECRET_FILE: join(dir, 'secret'),
+  },
   stdout: 'pipe',
   stderr: 'inherit',
 })

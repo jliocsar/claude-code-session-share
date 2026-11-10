@@ -1,13 +1,13 @@
-// sshare bridge: streams a herdr pane to the relay and hands guest prompts to the mod.
+// session-share bridge: streams a herdr pane to the relay and hands guest prompts to the mod.
 // stdout: one BridgeEvent JSON line per event. Control: HTTP over a unix socket.
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import type { BridgeEvent, BridgeToRelay, LinkView, Mode, RelayToBridge } from '../types/protocol'
 
-const PANE = process.env.SSHARE_PANE ?? ''
-const RELAY = (process.env.SSHARE_RELAY ?? 'https://sshare.exe.xyz').replace(/\/$/, '')
-const SECRET_FILE = process.env.SSHARE_SECRET_FILE ?? `${homedir()}/.config/sshare/secret`
+const PANE = process.env.SESSION_SHARE_PANE ?? ''
+const RELAY = (process.env.SESSION_SHARE_RELAY ?? 'https://sshare.exe.xyz').replace(/\/$/, '')
+const SECRET_FILE = process.env.SESSION_SHARE_SECRET_FILE ?? `${homedir()}/.config/session-share/secret`
 
 // The mod accepts any `<n>m|h|d`; this is the one place a TTL gets clamped.
 const TTL_DEFAULT = 2 * 3_600_000
@@ -45,7 +45,7 @@ const SECRET = readFileSync(SECRET_FILE, 'utf8').trim()
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 const sid = randomBytes(9).toString('base64url')
-const sock = `${process.env.XDG_RUNTIME_DIR ?? '/tmp'}/sshare-${process.pid}.sock`
+const sock = `${process.env.XDG_RUNTIME_DIR ?? '/tmp'}/session-share-${process.pid}.sock`
 let stopping = false
 
 // ---- links

@@ -12,7 +12,7 @@ export type ShareState = {
 
 declare module 'claude-code' {
   interface PluginState {
-    sshare: {
+    'session-share': {
       share: Shaped<ShareState>
       pending: Shaped<Pending[]>
     }

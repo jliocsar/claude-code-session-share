@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "sshare-relay",
+      "name": "session-share-relay",
       "dependencies": {
         "ghostty-web": "0.4.0",
       },

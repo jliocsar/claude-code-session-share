@@ -5,19 +5,19 @@ import type { Pending, ShareState } from '../types'
 import type { BridgeEvent, LinkView } from '../types/protocol'
 
 const IDLE: ShareState = { read: 0, edit: 0, relay: false }
-const share = atom({ plugin: 'sshare', key: 'share' } as const, IDLE, { shape: 'share-2' })
-const pending = atom({ plugin: 'sshare', key: 'pending' } as const, [] as Pending[], { shape: 'pending-1' })
+const share = atom({ plugin: 'session-share', key: 'share' } as const, IDLE, { shape: 'share-2' })
+const pending = atom({ plugin: 'session-share', key: 'pending' } as const, [] as Pending[], { shape: 'pending-1' })
 
 const MAX_PENDING = 20
-const GUEST_HEADER = '[sshare guest via edit link]'
+const GUEST_HEADER = '[session-share guest via edit link]'
 const USAGE = [
   'usage:',
-  '  /sshare read [ttl]                       watch-only link (ttl like 30m, 2h, 1d; default 2h)',
-  '  /sshare edit [ttl] [--mode approve|auto] link that can send prompts; approve (default) holds each one for your ok',
-  '  /sshare approve [all] | reject [all]     answer held guest messages (or press y/n on the band after ctrl+x tab)',
-  '  /sshare list                             active links',
-  '  /sshare revoke [read|edit]               kill links, keep sharing',
-  '  /sshare stop                             stop sharing, kick everyone',
+  '  /share-session read [ttl]                       watch-only link (ttl like 30m, 2h, 1d; default 2h)',
+  '  /share-session edit [ttl] [--mode approve|auto] link that can send prompts; approve (default) holds each one for your ok',
+  '  /share-session approve [all] | reject [all]     answer held guest messages (or press y/n on the band after ctrl+x tab)',
+  '  /share-session list                             active links',
+  '  /share-session revoke [read|edit]               kill links, keep sharing',
+  '  /share-session stop                             stop sharing, kick everyone',
 ].join('\n')
 
 // The module's handle on the bridge. A reload starts it over and kills the old child.
@@ -67,9 +67,9 @@ const linkKind = (l: LinkView) => (l.mode === 'read' ? 'read' : `edit/${l.approv
 function statusText(s: ShareState) {
   const dot = s.relay ? '●' : '○'
   const watching = s.read + s.edit
-  if (!watching) return `${dot} sshare`
+  if (!watching) return `${dot} session-share`
   const senders = s.edit ? ` (${s.edit} can send)` : ''
-  return `${dot} sshare · ${watching} watching${senders}`
+  return `${dot} session-share · ${watching} watching${senders}`
 }
 
 function showStatus($: EngineInterface, s: ShareState) {
@@ -102,7 +102,7 @@ async function submitGuest($: EngineInterface, p: Pending) {
   // not awaited: submit settles when the turn runs, and the guest only needs to know it's queued
   $.prompt
     .submit({ text: `${GUEST_HEADER}\n${p.text}` })
-    .catch(err => $.ui.toast(`sshare: guest message failed: ${err}`))
+    .catch(err => $.ui.toast(`session-share: guest message failed: ${err}`))
   await ack($, p.viewer, { ok: true })
 }
 
@@ -125,12 +125,12 @@ async function onGuestPrompt($: EngineInterface, text: string, viewer: string, a
   const p: Pending = { id: crypto.randomUUID(), text, viewer }
   if (!approve) {
     await submitGuest($, p)
-    await $.ui.toast('sshare: guest message queued')
+    await $.ui.toast('session-share: guest message queued')
     return
   }
   await update($, pending, l => [...l, p].slice(-MAX_PENDING))
   await ack($, viewer, { ok: false, pending: true })
-  await $.ui.toast('sshare: guest message waiting for your ok')
+  await $.ui.toast('session-share: guest message waiting for your ok')
 }
 
 // ---- bridge process
@@ -143,14 +143,14 @@ async function onBridgeEvent($: EngineInterface, ev: BridgeEvent) {
     case 'viewers': {
       const before = await read($, share)
       const after = await update($, share, s => ({ ...s, read: ev.read, edit: ev.edit }))
-      if (after.read + after.edit > before.read + before.edit) await $.ui.toast('sshare: someone joined')
+      if (after.read + after.edit > before.read + before.edit) await $.ui.toast('session-share: someone joined')
       await showStatus($, after)
       return
     }
     case 'prompt':
       return onGuestPrompt($, ev.text, ev.viewer, ev.approve)
     case 'fatal':
-      await $.ui.toast(`sshare: ${ev.why}`)
+      await $.ui.toast(`session-share: ${ev.why}`)
       return
   }
 }
@@ -158,9 +158,9 @@ async function onBridgeEvent($: EngineInterface, ev: BridgeEvent) {
 async function runBridge($: EngineInterface, resolve: (socket: string) => void, reject: (e: Error) => void) {
   const pane = await $.env.get('HERDR_PANE_ID')
   if (!pane) return reject(new Error('this session is not inside a herdr pane, so there is no terminal to share'))
-  const relay = await $.env.get('SSHARE_RELAY')
-  const env: Record<string, string> = { SSHARE_PANE: pane }
-  if (relay) env.SSHARE_RELAY = relay
+  const relay = await $.env.get('SESSION_SHARE_RELAY')
+  const env: Record<string, string> = { SESSION_SHARE_PANE: pane }
+  if (relay) env.SESSION_SHARE_RELAY = relay
   const child = $.process.spawn({ argv: ['bun', `${$.plugin.root}/bridge/bridge.ts`], env })
   let ready = false
   let buf = ''
@@ -205,7 +205,7 @@ function ensureBridge($: EngineInterface): Promise<string> {
   return p
 }
 
-// ---- /sshare
+// ---- /share-session
 
 async function shareLink(
   $: EngineInterface,
@@ -227,7 +227,7 @@ async function shareLink(
     : `${linkKind(l)} link (until ${until(l.expires)}). couldn't copy it, so here it is whole. anyone watching can see it:\n${l.url}`
   if (l.mode === 'read') return head
   if (l.approve)
-    return `${head}\nguest messages wait for your ok: y/n on the band (ctrl+x tab) or /sshare approve|reject.`
+    return `${head}\nguest messages wait for your ok: y/n on the band (ctrl+x tab) or /share-session approve|reject.`
   return `${head}\nauto mode: anyone with this link can prompt this session (and its tools) without asking. share it carefully.`
 }
 
@@ -269,7 +269,7 @@ async function runCommand($: EngineInterface, args: string) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'sshare',
+      name: 'share-session',
       description: 'Share this session as a live web link (read or edit)',
       argumentHint: 'read|edit [ttl] [--mode approve|auto] | approve|reject [all] | list | revoke | stop',
       immediate: true,
@@ -279,11 +279,11 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'sshare' }, async ($, e) => {
+  on('command.run', { command: 'share-session' }, async ($, e) => {
     try {
       return { text: await runCommand($, e.args) }
     } catch (err) {
-      return { text: `sshare: ${err instanceof Error ? err.message : String(err)}` }
+      return { text: `session-share: ${err instanceof Error ? err.message : String(err)}` }
     }
   })
 
@@ -300,7 +300,7 @@ export const register: Register = on => {
         <Box flexDirection="column">
           {below}
           <Text dimColor>
-            {statusText(s).replace('sshare', 'sharing session')}
+            {statusText(s).replace('session-share', 'sharing session')}
             {s.page ? ` · ${s.page.replace(/^https?:\/\//, '')}` : ''}
           </Text>
         </Box>
@@ -313,7 +313,7 @@ export const register: Register = on => {
       <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
         <Text>
           <Text color="yellow" bold>
-            sshare guest wants to send
+            session-share guest wants to send
           </Text>
           {more ? <Text dimColor> (+{list.length - 1} more)</Text> : null}
         </Text>
@@ -324,7 +324,7 @@ export const register: Register = on => {
           {more ? (
             <Button key="approve-all" hotkey="a" label="approve all" onPress={() => settle($, 'approve', true)} />
           ) : null}
-          <Text dimColor>ctrl+x tab to focus · /sshare approve|reject [all]</Text>
+          <Text dimColor>ctrl+x tab to focus · /share-session approve|reject [all]</Text>
         </Box>
       </Box>
     )

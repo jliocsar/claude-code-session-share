@@ -1,5 +1,5 @@
 {
-  "name": "sshare-relay",
+  "name": "session-share-relay",
   "private": true,
   "type": "module",
   "scripts": {

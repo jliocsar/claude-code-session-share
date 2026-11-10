@@ -1,11 +1,11 @@
-// sshare relay: bridges (the host's terminal) push frames in, viewers watch.
+// session-share relay: bridges (the host's terminal) push frames in, viewers watch.
 // Viewers prove a link token over the socket; the relay keeps only its hash.
 import { createHash, timingSafeEqual } from 'node:crypto'
 import type { ServerWebSocket } from 'bun'
 import type { BridgeToRelay, Mode, RelayToBridge, RelayToViewer } from '../plugin/types/protocol'
 
-const SECRET = process.env.SSHARE_SECRET ?? ''
-if (SECRET.length < 32) throw new Error('SSHARE_SECRET missing or too short')
+const SECRET = process.env.SESSION_SHARE_SECRET ?? ''
+if (SECRET.length < 32) throw new Error('SESSION_SHARE_SECRET missing or too short')
 const PORT = Number(process.env.PORT ?? 8000)
 const DIST = new URL('./node_modules/ghostty-web/dist/', import.meta.url).pathname
 const PAGES: Record<string, { file: string; type: string }> = {
@@ -255,4 +255,4 @@ Bun.serve({
     },
   },
 })
-console.log(`sshare relay on :${PORT}`)
+console.log(`session-share relay on :${PORT}`)

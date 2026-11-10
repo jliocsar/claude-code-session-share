@@ -1,4 +1,4 @@
-// sshare viewer: draws the shared terminal with ghostty-web and, on edit links, sends prompts.
+// session-share viewer: draws the shared terminal with ghostty-web and, on edit links, sends prompts.
 import { init, Terminal } from '/vendor/ghostty-web.js'
 
 const $ = id => document.getElementById(id)
@@ -7,10 +7,10 @@ const sid = location.pathname.split('/')[2]
 // keep the token out of the address bar once read; a reload finds it in sessionStorage
 const fromUrl = new URLSearchParams(location.hash.slice(1)).get('t')
 if (fromUrl) {
-  sessionStorage.setItem(`sshare:${sid}`, fromUrl)
+  sessionStorage.setItem(`session-share:${sid}`, fromUrl)
   history.replaceState(null, '', location.pathname)
 }
-const token = fromUrl || sessionStorage.getItem(`sshare:${sid}`)
+const token = fromUrl || sessionStorage.getItem(`session-share:${sid}`)
 
 function overlay(text) {
   $('overlay-text').textContent = text

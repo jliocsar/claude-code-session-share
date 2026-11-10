@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-sshare",
+  "name": "claude-code-session-share",
   "owner": { "name": "jliocsar" },
-  "plugins": [{ "name": "sshare", "source": "./plugin" }]
+  "plugins": [{ "name": "session-share", "source": "./plugin" }]
 }
