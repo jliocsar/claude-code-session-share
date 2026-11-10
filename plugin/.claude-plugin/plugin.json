@@ -2,5 +2,8 @@
   "name": "sshare",
   "version": "0.1.0",
   "description": "Share this terminal session as a live web link (read or edit) via a relay on exe.dev",
+  "author": {
+    "name": "jliocsar"
+  },
   "types": "./types/index.d.ts"
 }

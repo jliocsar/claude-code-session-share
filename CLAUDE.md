@@ -12,10 +12,13 @@ herdr pane --observe--> bridge (local, bun) --wss--> relay (exe.dev VM) --wss-->
 - `plugin/`: the Claude Code mod (function hooks plugin).
   - `hooks/register.tsx`: `/sshare` command, the approve band (`AbovePrompt`), status line, toasts. Spawns the bridge with `$.process.spawn` and reads its stdout.
   - `bridge/bridge.ts`: a Bun process. Runs `herdr terminal session observe <pane>`, pushes frames to the relay, holds the link tokens, and serves a control API on a unix socket.
-  - `types/index.d.ts`: the `$.state` contract (`sshare.share`, `sshare.pending`).
-- `relay/`: a Bun server (`server.ts`) plus the viewer page (`viewer.html`). Serves ghostty-web from `node_modules/ghostty-web/dist` under `/vendor/`. The wasm is inlined in the JS.
+  - `types/index.d.ts`: the `$.state` contract (`sshare.share`, `sshare.pending`). The validator wants it self-contained, so it can't re-export anything.
+  - `types/protocol.d.ts`: every wire message between the four pieces. The mod, the bridge, the relay and the test all `import type` from it. Type-only imports vanish at runtime, which is why the relay deploys without it.
+- `relay/`: a Bun server (`server.ts`) plus the viewer page (`viewer.html` + `viewer.js`). Serves ghostty-web from `node_modules/ghostty-web/dist` under `/vendor/`. The wasm is inlined in the JS. The page has no inline script, so the CSP has no `'unsafe-inline'` for scripts.
+- `test/e2e.ts`: end-to-end test. Starts a local relay on a random port with a throwaway secret, runs the real bridge on the current herdr pane, and drives fake viewers.
 - `.claude-plugin/marketplace.json`: makes the repo installable with `/plugin install sshare --marketplace jliocsar/claude-code-sshare`.
-- `tmp/`: gitignored scratch. Holds `e2e.ts` (end-to-end smoke test), screenshots and the unpacked ghostty-web package.
+- Root `package.json`: dev tooling only (biome, typescript, `@types/bun`). `relay/package.json` is what the VM installs.
+- `tmp/`: gitignored scratch (screenshots, the unpacked ghostty-web package, handoffs).
 
 ## Why herdr
 
@@ -29,7 +32,10 @@ It needs no TTY. A `full` frame clears the screen and redraws it. Without `--col
 
 ## Protocols
 
+The types live in `plugin/types/protocol.d.ts`. In short:
+
 Bridge stdout to the mod (JSON lines):
+
 - `ready {sid, socket}`
 - `relay {online}`
 - `viewers {read, edit}`
@@ -37,6 +43,7 @@ Bridge stdout to the mod (JSON lines):
 - `fatal {why}`
 
 Mod to bridge: HTTP over the unix socket `$XDG_RUNTIME_DIR/sshare-<pid>.sock`, via `$.http.fetch(url, { socketPath })`. Every route is a POST with a JSON body.
+
 - `/link {mode, ttlMs, approve}` returns `{mode, approve, url, expires}`.
 - `/links`
 - `/revoke {mode?}`
@@ -44,10 +51,12 @@ Mod to bridge: HTTP over the unix socket `$XDG_RUNTIME_DIR/sshare-<pid>.sock`, v
 - `/stop`
 
 Bridge and relay talk over `wss://<relay>/ws/bridge?sid=<sid>` with `Authorization: Bearer <secret>`.
+
 - Bridge to relay: `hello {tokens:[{hash,mode,expires}]}`, `token.add`, `token.revoke {hash}`, `frame {...}`, `queued {viewer, ok, pending, why}`, `end`.
 - Relay to bridge: `prompt {text, viewer, hash}`, `viewers {read, edit}`, `resync`.
 
 Viewer and relay talk over `wss://<relay>/ws/view?sid=<sid>`.
+
 - The viewer sends `auth {token}` within 5s, then `prompt {text}`.
 - The relay sends `hello {mode, expires, online}`, `frame`, `host {online}`, `queued {ok, pending, why}` and `closed {reason}`.
 
@@ -79,7 +88,7 @@ Viewer and relay talk over `wss://<relay>/ws/view?sid=<sid>`.
 Deploy the relay:
 
 ```sh
-cd relay && scp server.ts viewer.html sshare.exe.xyz:relay/ \
+cd relay && scp server.ts viewer.html viewer.js sshare.exe.xyz:relay/ \
   && ssh sshare.exe.xyz 'sudo systemctl restart sshare-relay && systemctl is-active sshare-relay'
 ```
 
@@ -88,7 +97,13 @@ If `package.json` changed, run `~/.bun/bin/bun install` in `~/relay` on the VM.
 ## Developing the mod
 
 - There are two copies. `plugin/` is the repo copy. The session loads the dev-mods copy, at `~/.claude/dev-mods/<session-id>/sshare/` (it was `06d17896-8cde-428c-ab86-1f96aaf13fcf` when this was built). Edit one, then sync: `rsync -a --exclude .claude-plugin/types plugin/ ~/.claude/dev-mods/<session-id>/sshare/`, or the reverse. Dev-mods hot-reload when the turn ends.
-- Check with `claude plugin validate plugin/`. Type-check with `tsc -p plugin` once the engine has laid `plugin/.claude-plugin/types/`. That folder is gitignored and the engine writes it.
+- Tooling, from the repo root after `bun install` (and `bun install` in `relay/` for the test):
+  - `bun run lint`: biome (lint + format check; `bun run fix` writes). Style: 2 spaces, single quotes, no semicolons, 120 columns.
+  - `bun run typecheck`: `tsc -p .` (relay, bridge, test, with bun types) and `tsc -p plugin` (the mod).
+  - `bun run check`: lint + typecheck + `claude plugin validate plugin`.
+  - `bun run test`: the e2e test. Run it inside herdr.
+- `tsc -p plugin` needs `plugin/.claude-plugin/types/`, which the engine writes into the loaded copy only. Copy it over: `rsync -a ~/.claude/dev-mods/<session-id>/sshare/.claude-plugin/types plugin/.claude-plugin/`. It's gitignored.
+- Don't run `biome migrate`: on 2.6 it rewrote `rules.recommended: true` to `preset: "none"`, which silently turns every rule off. The config uses `preset: "recommended"`.
 - Mod API rules learned the hard way:
   - A function that receives `$` must be a top-level function declaration, or the validator refuses it. Helpers live at module top level, not inside `register`.
   - Every `$.state` value is declared in `types/index.d.ts` as `Shaped<T>`.
@@ -96,13 +111,14 @@ If `package.json` changed, run `~/.bun/bin/bun install` in `~/relay` on the VM.
   - Module variables reset on reload, and a reload kills the spawned bridge. `session.start` resets the state atoms.
   - Band `Button` hotkeys only work while the band has focus (ctrl+x tab or a click).
   - The command is registered `immediate: true`, so `/sshare` runs mid-turn.
-- Smoke test: `bun tmp/e2e.ts`, run inside herdr. It spawns a bridge, makes read and edit links, and drives fake viewers. It covers a bad token, a prompt refused on a read link, the edit prompt ack, revoke and stop. The test hardcodes the dev-mods path.
+  - The contract (`types/index.d.ts`) can't import or re-export. Other types come from `types/protocol.d.ts` directly.
+  - `$.prompt.submit` settles when the turn runs, so the mod doesn't await it before acking the guest.
+- The e2e test covers: link defaults and TTL clamp, the page's CSP, late-join frames, bad tokens and unknown sessions (4003), viewer counts (one update per kick), read links refused, approve vs auto prompts, the pending ack, rate limiting, revoke and stop. It doesn't drive the mod itself (the band, `$.prompt.submit`).
 - Visual check: start a bridge, make a link through the socket (`curl --unix-socket <sock> -X POST http://x/link -d '{"mode":"edit"}'`), then open it with `agent-browser`.
 
 ## Known gaps
 
 - The approve band hasn't been seen live yet. `/sshare edit` in auto mode was verified end to end.
-- The relay sends the bridge duplicate `viewers` counts. They're harmless, because the mod only toasts on an increase.
 - The viewer scales the terminal to fit and doesn't reflow it. On small screens the text gets tiny.
 - Relay sessions are in memory only.
 - There's no LICENSE yet.

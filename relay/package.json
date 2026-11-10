@@ -2,6 +2,10 @@
   "name": "sshare-relay",
   "private": true,
   "type": "module",
-  "scripts": { "start": "bun server.ts" },
-  "dependencies": { "ghostty-web": "0.4.0" }
+  "scripts": {
+    "start": "bun server.ts"
+  },
+  "dependencies": {
+    "ghostty-web": "0.4.0"
+  }
 }

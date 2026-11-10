@@ -1,104 +1,173 @@
-// sshare bridge: streams a herdr pane to the relay, hands guest prompts to the mod.
-// stdout: one JSON line per event for the mod. control: HTTP over a unix socket.
+// sshare bridge: streams a herdr pane to the relay and hands guest prompts to the mod.
+// stdout: one BridgeEvent JSON line per event. Control: HTTP over a unix socket.
 import { createHash, randomBytes } from 'node:crypto'
-import { readFileSync, unlinkSync, existsSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
+import type { BridgeEvent, BridgeToRelay, LinkView, Mode, RelayToBridge } from '../types/protocol'
 
 const PANE = process.env.SSHARE_PANE ?? ''
 const RELAY = (process.env.SSHARE_RELAY ?? 'https://sshare.exe.xyz').replace(/\/$/, '')
 const SECRET_FILE = process.env.SSHARE_SECRET_FILE ?? `${homedir()}/.config/sshare/secret`
-const out = (o: unknown) => process.stdout.write(JSON.stringify(o) + '\n')
-const fail = (why: string) => { out({ type: 'fatal', why }); process.exit(1) }
+
+// The mod accepts any `<n>m|h|d`; this is the one place a TTL gets clamped.
+const TTL_DEFAULT = 2 * 3_600_000
+const TTL_MIN = 60_000
+const TTL_MAX = 7 * 86_400_000
+
+const emit = (e: BridgeEvent) => process.stdout.write(`${JSON.stringify(e)}\n`)
+
+function fail(why: string): never {
+  emit({ type: 'fatal', why })
+  process.exit(1)
+}
+
+function parse<T>(text: string): T | undefined {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+async function* lines(stream: ReadableStream<Uint8Array>) {
+  const dec = new TextDecoder()
+  let buf = ''
+  for await (const chunk of stream) {
+    const parts = (buf + dec.decode(chunk, { stream: true })).split('\n')
+    buf = parts.pop() ?? ''
+    for (const line of parts) if (line) yield line
+  }
+}
 
 if (!PANE) fail('no herdr pane (is this session running inside herdr?)')
 if (!existsSync(SECRET_FILE)) fail(`no relay secret at ${SECRET_FILE}`)
 const SECRET = readFileSync(SECRET_FILE, 'utf8').trim()
 
-const b64url = (b: Buffer) => b.toString('base64url')
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
-const sid = b64url(randomBytes(9))
+const sid = randomBytes(9).toString('base64url')
 const sock = `${process.env.XDG_RUNTIME_DIR ?? '/tmp'}/sshare-${process.pid}.sock`
+let stopping = false
 
-type Mode = 'read' | 'edit'
-type Link = { mode: Mode; approve: boolean; token: string; hash: string; expires: number; url: string }
+// ---- links
+
+type Link = LinkView & { token: string; hash: string }
 const links = new Map<string, Link>()
 
+const view = ({ mode, approve, url, expires }: Link): LinkView => ({ mode, approve, url, expires })
+const tokenList = () => [...links.values()].map(({ hash, mode, expires }) => ({ hash, mode, expires }))
+
+function addLink(mode: Mode, ttlMs: number, approve: boolean) {
+  const token = randomBytes(32).toString('base64url')
+  const link: Link = {
+    mode,
+    approve,
+    token,
+    hash: sha(token),
+    expires: Date.now() + ttlMs,
+    url: `${RELAY}/s/${sid}#t=${token}`,
+  }
+  links.set(link.hash, link)
+  toRelay({ type: 'token.add', hash: link.hash, mode, expires: link.expires })
+  return link
+}
+
+function revoke(pred: (l: Link) => boolean) {
+  let n = 0
+  for (const l of [...links.values()]) {
+    if (!pred(l)) continue
+    links.delete(l.hash)
+    toRelay({ type: 'token.revoke', hash: l.hash })
+    n++
+  }
+  return n
+}
+
+function clampTtl(ms: unknown) {
+  return Math.min(Math.max(Number(ms) || TTL_DEFAULT, TTL_MIN), TTL_MAX)
+}
+
 // ---- relay socket, reconnecting
+
 let ws: WebSocket | undefined
-let wsOpen = false
+let online = false
 let backoff = 500
-const toRelay = (o: unknown) => { if (wsOpen) ws!.send(JSON.stringify(o)) }
-const tokenList = () => [...links.values()].map(l => ({ hash: l.hash, mode: l.mode, expires: l.expires }))
+
+function toRelay(m: BridgeToRelay) {
+  if (online) ws?.send(JSON.stringify(m))
+}
+
+function onRelay(m: RelayToBridge) {
+  switch (m.type) {
+    case 'prompt':
+      return emit({ type: 'prompt', text: m.text, viewer: m.viewer, approve: links.get(m.hash)?.approve ?? true })
+    case 'viewers':
+      return emit({ type: 'viewers', read: m.read, edit: m.edit })
+    case 'resync':
+      return restartObserve()
+  }
+}
 
 function connect() {
-  const url = RELAY.replace(/^http/, 'ws') + `/ws/bridge?sid=${sid}`
-  ws = new WebSocket(url, { headers: { authorization: `Bearer ${SECRET}` } } as any)
-  ws.onopen = () => {
-    wsOpen = true
+  const url = `${RELAY.replace(/^http/, 'ws')}/ws/bridge?sid=${sid}`
+  const socket = new WebSocket(url, { headers: { authorization: `Bearer ${SECRET}` } })
+  ws = socket
+  socket.onopen = () => {
+    online = true
     backoff = 500
     toRelay({ type: 'hello', tokens: tokenList() })
     restartObserve() // a fresh full frame for the relay's cache
-    out({ type: 'relay', online: true })
+    emit({ type: 'relay', online: true })
   }
-  ws.onmessage = ev => {
-    let m: any
-    try { m = JSON.parse(String(ev.data)) } catch { return }
-    if (m.type === 'prompt') out({ type: 'prompt', text: m.text, viewer: m.viewer, approve: links.get(m.hash)?.approve ?? true })
-    else if (m.type === 'viewers') out({ type: 'viewers', read: m.read, edit: m.edit })
-    else if (m.type === 'resync') restartObserve()
+  socket.onmessage = ev => {
+    const m = parse<RelayToBridge>(String(ev.data))
+    if (m) onRelay(m)
   }
-  ws.onclose = ev => {
-    if (wsOpen) out({ type: 'relay', online: false })
-    wsOpen = false
+  // an error is always followed by close, which retries
+  socket.onerror = () => {}
+  socket.onclose = () => {
+    if (online) emit({ type: 'relay', online: false })
+    online = false
     if (stopping) return
-    if (ev.code === 1008 || ev.code === 4000) {} // replaced or refused: still retry
+    // refused or replaced sockets retry too: the relay may just be restarting
     setTimeout(connect, backoff)
     backoff = Math.min(backoff * 2, 15_000)
   }
-  ws.onerror = () => {}
 }
 
 // ---- herdr observe, restarted on resize
-let observer: ReturnType<typeof Bun.spawn> | undefined
+
+type HerdrFrame = { type: string; bytes: string; full: boolean; width: number; height: number; seq: number }
+type HerdrLayout = { result: { layout: { panes: { pane_id: string; rect: { width: number; height: number } }[] } } }
+
+let observer: Bun.Subprocess | undefined
 let size = { w: 0, h: 0 }
 
 async function paneSize() {
   const p = Bun.spawn(['herdr', 'pane', 'layout', '--pane', PANE], { stdout: 'pipe', stderr: 'ignore' })
-  const text = await new Response(p.stdout).text()
-  try {
-    const j = JSON.parse(text)
-    const me = j.result.layout.panes.find((x: any) => x.pane_id === PANE)
-    return me ? { w: me.rect.width, h: me.rect.height } : undefined
-  } catch { return undefined }
+  const layout = parse<HerdrLayout>(await new Response(p.stdout).text())
+  const rect = layout?.result?.layout?.panes?.find(x => x.pane_id === PANE)?.rect
+  return rect && { w: rect.width, h: rect.height }
 }
 
 function restartObserve() {
   observer?.kill()
   observer = undefined
   if (!size.w || stopping) return
-  const p = Bun.spawn(['herdr', 'terminal', 'session', 'observe', PANE, '--cols', String(size.w), '--rows', String(size.h)], {
-    stdin: 'ignore', stdout: 'pipe', stderr: 'ignore',
-  })
+  const argv = ['herdr', 'terminal', 'session', 'observe', PANE, '--cols', String(size.w), '--rows', String(size.h)]
+  const p = Bun.spawn(argv, { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' })
   observer = p
-  ;(async () => {
-    let buf = ''
-    const dec = new TextDecoder()
-    for await (const chunk of p.stdout as ReadableStream<Uint8Array>) {
-      buf += dec.decode(chunk, { stream: true })
-      let i
-      while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i)
-        buf = buf.slice(i + 1)
-        if (!line) continue
-        try {
-          const f = JSON.parse(line)
-          if (f.type === 'terminal.frame') toRelay({ type: 'frame', bytes: f.bytes, full: f.full, width: f.width, height: f.height, seq: f.seq })
-        } catch {}
-      }
-    }
-    await p.exited
-    if (observer === p && !stopping) setTimeout(restartObserve, 1000)
-  })()
+  void pump(p)
+}
+
+async function pump(p: { stdout: ReadableStream<Uint8Array>; exited: Promise<number> }) {
+  for await (const line of lines(p.stdout)) {
+    const f = parse<HerdrFrame>(line)
+    if (f?.type !== 'terminal.frame') continue
+    toRelay({ type: 'frame', bytes: f.bytes, full: f.full, width: f.width, height: f.height, seq: f.seq })
+  }
+  await p.exited
+  // died on its own, not through restartObserve: bring it back
+  if (observer === p && !stopping) setTimeout(restartObserve, 1000)
 }
 
 async function watchSize() {
@@ -107,76 +176,64 @@ async function watchSize() {
     if (!size.w) fail(`herdr pane ${PANE} not found`)
     return
   }
-  if (s.w !== size.w || s.h !== size.h) {
-    size = s
-    restartObserve()
-  }
+  if (s.w === size.w && s.h === size.h) return
+  size = s
+  restartObserve()
 }
-
-// ---- links
-function addLink(mode: Mode, ttlMs: number, approve: boolean) {
-  const token = b64url(randomBytes(32))
-  const l: Link = { mode, approve, token, hash: sha(token), expires: Date.now() + ttlMs, url: `${RELAY}/s/${sid}#t=${token}` }
-  links.set(l.hash, l)
-  toRelay({ type: 'token.add', hash: l.hash, mode, expires: l.expires })
-  return l
-}
-function revoke(pred: (l: Link) => boolean) {
-  let n = 0
-  for (const l of [...links.values()]) if (pred(l)) {
-    links.delete(l.hash)
-    toRelay({ type: 'token.revoke', hash: l.hash })
-    n++
-  }
-  return n
-}
-const view = (l: Link) => ({ mode: l.mode, approve: l.approve, url: l.url, expires: l.expires })
 
 // ---- control socket for the mod
-let stopping = false
-async function stop() {
+
+function stop() {
   stopping = true
   toRelay({ type: 'end' })
   observer?.kill()
-  setTimeout(() => { try { unlinkSync(sock) } catch {}; process.exit(0) }, 300)
+  setTimeout(() => {
+    removeSocket()
+    process.exit(0)
+  }, 300)
 }
 
-try { unlinkSync(sock) } catch {}
+function removeSocket() {
+  try {
+    unlinkSync(sock)
+  } catch {}
+}
+
+type Body = Record<string, unknown>
+const routes: Record<string, (b: Body) => unknown> = {
+  '/link': b => view(addLink(b.mode === 'edit' ? 'edit' : 'read', clampTtl(b.ttlMs), b.approve !== false)),
+  '/links': () => ({ sid, relay: online, links: [...links.values()].map(view) }),
+  '/revoke': b => ({ revoked: revoke(l => !b.mode || l.mode === b.mode) }),
+  '/queued': b => {
+    const why = typeof b.why === 'string' ? b.why : undefined
+    toRelay({ type: 'queued', viewer: String(b.viewer), ok: b.ok === true, pending: b.pending === true, why })
+    return {}
+  },
+  '/stop': () => {
+    stop()
+    return { stopped: true }
+  },
+}
+
+removeSocket()
 Bun.serve({
   unix: sock,
   async fetch(req) {
-    const url = new URL(req.url)
-    const body: any = req.method === 'POST' ? await req.json().catch(() => ({})) : {}
-    if (url.pathname === '/link') {
-      const mode: Mode = body.mode === 'edit' ? 'edit' : 'read'
-      const ttl = Math.min(Math.max(Number(body.ttlMs) || 2 * 3600_000, 60_000), 7 * 24 * 3600_000)
-      return Response.json(view(addLink(mode, ttl, body.approve !== false)))
-    }
-    if (url.pathname === '/links') return Response.json({ sid, relay: wsOpen, links: [...links.values()].map(view) })
-    if (url.pathname === '/revoke') {
-      const n = revoke(l => !body.mode || l.mode === body.mode)
-      return Response.json({ revoked: n })
-    }
-    if (url.pathname === '/queued') {
-      toRelay({ type: 'queued', viewer: body.viewer, ok: !!body.ok, pending: !!body.pending, why: body.why })
-      return Response.json({})
-    }
-    if (url.pathname === '/stop') { void stop(); return Response.json({ stopped: true }) }
-    return new Response('not found', { status: 404 })
+    const route = routes[new URL(req.url).pathname]
+    if (!route) return new Response('not found', { status: 404 })
+    const body = (await req.json().catch(() => ({}))) as Body
+    return Response.json(route(body))
   },
 })
 
-// expire links locally too; the relay enforces the same deadline
+// expire links here too; the relay enforces the same deadline
 setInterval(() => revoke(l => l.expires < Date.now()), 10_000)
-// size changes and orphan check (parent gone -> reparented)
+// follow pane resizes, and quit if the mod's process went away (we got reparented)
 const parent = process.ppid
-setInterval(() => {
-  if (process.ppid !== parent) void stop()
-  else void watchSize()
-}, 2000)
-process.on('SIGTERM', () => void stop())
-process.on('SIGINT', () => void stop())
+setInterval(() => (process.ppid === parent ? void watchSize() : stop()), 2000)
+process.on('SIGTERM', stop)
+process.on('SIGINT', stop)
 
 await watchSize()
 connect()
-out({ type: 'ready', sid, socket: sock })
+emit({ type: 'ready', sid, socket: sock })

@@ -1,12 +1,15 @@
-import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
+import { atom, read, update } from 'claude-code'
 
 import type { Pending, ShareState } from '../types'
+import type { BridgeEvent, LinkView } from '../types/protocol'
 
 const IDLE: ShareState = { read: 0, edit: 0, relay: false }
 const share = atom({ plugin: 'sshare', key: 'share' } as const, IDLE, { shape: 'share-1' })
 const pending = atom({ plugin: 'sshare', key: 'pending' } as const, [] as Pending[], { shape: 'pending-1' })
 
+const MAX_PENDING = 20
+const GUEST_HEADER = '[sshare guest via edit link]'
 const USAGE = [
   'usage:',
   '  /sshare read [ttl]                       watch-only link (ttl like 30m, 2h, 1d; default 2h)',
@@ -17,9 +20,12 @@ const USAGE = [
   '  /sshare stop                             stop sharing, kick everyone',
 ].join('\n')
 
-// the module's own handle on the bridge; a reload starts it over (and kills the old child)
+// The module's handle on the bridge. A reload starts it over and kills the old child.
 let starting: Promise<string> | undefined
 
+// ---- parsing
+
+// `30m`, `2h`, `1d`. The bridge clamps the result to 1m..7d.
 function parseTtl(s: string | undefined) {
   if (!s) return undefined
   const m = s.match(/^(\d+)([mhd])$/)
@@ -36,24 +42,40 @@ function parseArgs(args: string) {
   for (let i = 0; i < words.length; i++) {
     const w = words[i] ?? ''
     if (w === '--mode') mode = words[++i]
-    else if (w.startsWith('--mode=')) mode = w.slice(7)
+    else if (w.startsWith('--mode=')) mode = w.slice('--mode='.length)
     else rest.push(w)
   }
   return { sub, mode, rest }
 }
 
-function until(t: number) {
-  return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+function parseEvent(line: string): BridgeEvent | undefined {
+  try {
+    return JSON.parse(line)
+  } catch {
+    return undefined
+  }
+}
+
+const until = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const linkKind = (l: LinkView) => (l.mode === 'read' ? 'read' : `edit/${l.approve ? 'approve' : 'auto'}`)
+
+// ---- status line
+
+function statusText(s: ShareState) {
+  const dot = s.relay ? '●' : '○'
+  const watching = s.read + s.edit
+  if (!watching) return `${dot} sshare`
+  const senders = s.edit ? ` (${s.edit} can send)` : ''
+  return `${dot} sshare · ${watching} watching${senders}`
 }
 
 function showStatus($: EngineInterface, s: ShareState) {
-  if (!s.socket) return $.ui.status(undefined)
-  const who = s.read + s.edit
-  const dot = s.relay ? '●' : '○'
-  return $.ui.status(`${dot} sshare${who ? ` · ${who} watching${s.edit ? ` (${s.edit} can send)` : ''}` : ''}`)
+  return $.ui.status(s.socket ? statusText(s) : undefined)
 }
 
-async function bridgeCall($: EngineInterface, path: string, body?: unknown) {
+// ---- bridge control socket
+
+async function bridgeCall<T>($: EngineInterface, path: string, body?: unknown): Promise<T> {
   const s = await read($, share)
   if (!s.socket) throw new Error('not sharing')
   const r = await $.http.fetch(`http://bridge${path}`, {
@@ -66,63 +88,79 @@ async function bridgeCall($: EngineInterface, path: string, body?: unknown) {
   return JSON.parse(r.text)
 }
 
-async function submitGuest($: EngineInterface, p: Pending) {
-  let ok = true
-  let why: string | undefined
-  try {
-    void $.prompt.submit({ text: `[sshare guest via edit link]\n${p.text}` })
-  } catch (err) {
-    ok = false
-    why = String(err)
-  }
-  await bridgeCall($, '/queued', { viewer: p.viewer, ok, why }).catch(() => {})
-  return ok
+// Tell the guest's page what happened to its message. Best effort.
+async function ack($: EngineInterface, viewer: string, result: { ok: boolean; pending?: boolean; why?: string }) {
+  await bridgeCall($, '/queued', { viewer, ...result }).catch(() => {})
 }
 
-async function answer($: EngineInterface, ids: 'first' | 'all', approve: boolean) {
+// ---- guest messages
+
+async function submitGuest($: EngineInterface, p: Pending) {
+  // not awaited: submit settles when the turn runs, and the guest only needs to know it's queued
+  $.prompt
+    .submit({ text: `${GUEST_HEADER}\n${p.text}` })
+    .catch(err => $.ui.toast(`sshare: guest message failed: ${err}`))
+  await ack($, p.viewer, { ok: true })
+}
+
+type Verdict = 'approve' | 'reject'
+
+async function settle($: EngineInterface, verdict: Verdict, all = false) {
   const list = await read($, pending)
-  const picked = ids === 'all' ? list : list.slice(0, 1)
+  const picked = all ? list : list.slice(0, 1)
   if (!picked.length) return 0
-  const gone = new Set(picked.map(p => p.id))
-  await update($, pending, l => l.filter(p => !gone.has(p.id)))
+  const done = new Set(picked.map(p => p.id))
+  await update($, pending, l => l.filter(p => !done.has(p.id)))
   for (const p of picked) {
-    if (approve) await submitGuest($, p)
-    else await bridgeCall($, '/queued', { viewer: p.viewer, ok: false, why: 'the host declined it' }).catch(() => {})
+    if (verdict === 'approve') await submitGuest($, p)
+    else await ack($, p.viewer, { ok: false, why: 'the host declined it' })
   }
   return picked.length
 }
 
-async function onBridgeLine($: EngineInterface, m: any) {
-  if (m.type === 'relay') {
-    await showStatus($, await update($, share, s => ({ ...s, relay: m.online })))
-  } else if (m.type === 'viewers') {
-    const before = await read($, share)
-    const after = await update($, share, s => ({ ...s, read: m.read, edit: m.edit }))
-    if (m.read + m.edit > before.read + before.edit) await $.ui.toast('sshare: someone joined')
-    await showStatus($, after)
-  } else if (m.type === 'prompt') {
-    const p: Pending = { id: crypto.randomUUID(), text: String(m.text), viewer: String(m.viewer) }
-    if (m.approve === false) {
-      if (await submitGuest($, p)) await $.ui.toast('sshare: guest message queued')
+async function onGuestPrompt($: EngineInterface, text: string, viewer: string, approve: boolean) {
+  const p: Pending = { id: crypto.randomUUID(), text, viewer }
+  if (!approve) {
+    await submitGuest($, p)
+    await $.ui.toast('sshare: guest message queued')
+    return
+  }
+  await update($, pending, l => [...l, p].slice(-MAX_PENDING))
+  await ack($, viewer, { ok: false, pending: true })
+  await $.ui.toast('sshare: guest message waiting for your ok')
+}
+
+// ---- bridge process
+
+async function onBridgeEvent($: EngineInterface, ev: BridgeEvent) {
+  switch (ev.type) {
+    case 'relay':
+      await showStatus($, await update($, share, s => ({ ...s, relay: ev.online })))
+      return
+    case 'viewers': {
+      const before = await read($, share)
+      const after = await update($, share, s => ({ ...s, read: ev.read, edit: ev.edit }))
+      if (after.read + after.edit > before.read + before.edit) await $.ui.toast('sshare: someone joined')
+      await showStatus($, after)
       return
     }
-    await update($, pending, l => [...l, p].slice(-20))
-    await bridgeCall($, '/queued', { viewer: p.viewer, ok: false, pending: true }).catch(() => {})
-    await $.ui.toast('sshare: guest message waiting for your ok')
-  } else if (m.type === 'fatal') {
-    await $.ui.toast(`sshare: ${m.why}`)
+    case 'prompt':
+      return onGuestPrompt($, ev.text, ev.viewer, ev.approve)
+    case 'fatal':
+      await $.ui.toast(`sshare: ${ev.why}`)
+      return
   }
 }
 
-async function runBridge($: EngineInterface, resolve: (s: string) => void, reject: (e: Error) => void) {
+async function runBridge($: EngineInterface, resolve: (socket: string) => void, reject: (e: Error) => void) {
   const pane = await $.env.get('HERDR_PANE_ID')
   if (!pane) return reject(new Error('this session is not inside a herdr pane, so there is no terminal to share'))
   const relay = await $.env.get('SSHARE_RELAY')
   const env: Record<string, string> = { SSHARE_PANE: pane }
   if (relay) env.SSHARE_RELAY = relay
   const child = $.process.spawn({ argv: ['bun', `${$.plugin.root}/bridge/bridge.ts`], env })
-  let buf = ''
   let ready = false
+  let buf = ''
   try {
     for await (const piece of child) {
       if (!('stream' in piece)) continue
@@ -130,22 +168,16 @@ async function runBridge($: EngineInterface, resolve: (s: string) => void, rejec
         await $.ui.log(piece.text, { to: 'debug' })
         continue
       }
-      buf += piece.text
-      let i
-      while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i)
-        buf = buf.slice(i + 1)
-        let m: any
-        try { m = JSON.parse(line) } catch { continue }
-        if (m.type === 'ready') {
+      const lines = (buf + piece.text).split('\n')
+      buf = lines.pop() ?? ''
+      for (const line of lines) {
+        const ev = parseEvent(line)
+        if (ev?.type === 'ready') {
           ready = true
-          await update($, share, () => ({ ...IDLE, socket: m.socket, sid: m.sid }))
-          resolve(m.socket)
-        } else if (m.type === 'fatal' && !ready) {
-          reject(new Error(m.why))
-        } else {
-          await onBridgeLine($, m)
-        }
+          await update($, share, () => ({ ...IDLE, socket: ev.socket, sid: ev.sid }))
+          resolve(ev.socket)
+        } else if (ev?.type === 'fatal' && !ready) reject(new Error(ev.why))
+        else if (ev) await onBridgeEvent($, ev)
       }
     }
   } catch (err) {
@@ -155,61 +187,77 @@ async function runBridge($: EngineInterface, resolve: (s: string) => void, rejec
     await update($, share, () => IDLE)
     await update($, pending, () => [])
     await $.ui.status(undefined)
-    if (!ready) reject(new Error('the bridge exited before it was ready (is bun on PATH?)'))
+    // a no-op if it already resolved or rejected
+    reject(new Error('the bridge exited before it was ready (is bun on PATH?)'))
   }
 }
 
 function ensureBridge($: EngineInterface): Promise<string> {
   if (starting) return starting
-  const p = new Promise<string>((resolve, reject) => { void runBridge($, resolve, reject) })
+  const p = new Promise<string>((resolve, reject) => void runBridge($, resolve, reject))
   starting = p
-  p.catch(() => { if (starting === p) starting = undefined })
+  p.catch(() => {
+    if (starting === p) starting = undefined
+  })
   return p
+}
+
+// ---- /sshare
+
+async function shareLink(
+  $: EngineInterface,
+  sub: 'read' | 'edit',
+  mode: string | undefined,
+  ttlArg: string | undefined,
+) {
+  const ttlMs = parseTtl(ttlArg)
+  if (ttlMs === null) return `bad ttl "${ttlArg}"\n${USAGE}`
+  if (mode !== undefined && mode !== 'approve' && mode !== 'auto')
+    return `bad --mode "${mode}" (approve or auto)\n${USAGE}`
+  if (sub === 'read' && mode) return '--mode only applies to edit links.'
+  await ensureBridge($)
+  const l = await bridgeCall<LinkView>($, '/link', { mode: sub, ttlMs, approve: mode !== 'auto' })
+  await showStatus($, await read($, share))
+  const head = `${linkKind(l)} link (until ${until(l.expires)}):\n${l.url}`
+  if (l.mode === 'read') return head
+  if (l.approve)
+    return `${head}\nguest messages wait for your ok: y/n on the band (ctrl+x tab) or /sshare approve|reject.`
+  return `${head}\nauto mode: anyone with this link can prompt this session (and its tools) without asking. share it carefully.`
+}
+
+async function listLinks($: EngineInterface) {
+  const { links } = await bridgeCall<{ links: LinkView[] }>($, '/links')
+  if (!links.length) return 'sharing, but no active links.'
+  return links.map(l => `${linkKind(l).padEnd(12)}  until ${until(l.expires)}  ${l.url}`).join('\n')
 }
 
 async function runCommand($: EngineInterface, args: string) {
   const { sub, mode, rest } = parseArgs(args)
-  if (sub === 'read' || sub === 'edit') {
-    const ttlMs = parseTtl(rest[0])
-    if (ttlMs === null) return `bad ttl "${rest[0]}"\n${USAGE}`
-    if (mode !== undefined && mode !== 'approve' && mode !== 'auto') return `bad --mode "${mode}" (approve or auto)\n${USAGE}`
-    if (sub === 'read' && mode) return '--mode only applies to edit links.'
-    await ensureBridge($)
-    const l = await bridgeCall($, '/link', { mode: sub, ttlMs, approve: mode !== 'auto' })
-    await showStatus($, await read($, share))
-    const warn =
-      sub === 'read' ? ''
-      : l.approve ? '\nguest messages wait for your ok: y/n on the band (ctrl+x tab) or /sshare approve|reject.'
-      : '\nauto mode: anyone with this link can prompt this session (and its tools) without asking. share it carefully.'
-    return `${sub}${sub === 'edit' ? ` (${l.approve ? 'approve' : 'auto'})` : ''} link (until ${until(l.expires)}):\n${l.url}${warn}`
+  const sharing = !!(await read($, share)).socket
+  switch (sub) {
+    case 'read':
+    case 'edit':
+      return shareLink($, sub, mode, rest[0])
+    case 'approve':
+    case 'reject': {
+      const n = await settle($, sub, rest[0] === 'all')
+      return n ? `${sub === 'approve' ? 'approved' : 'rejected'} ${n} guest message(s).` : 'nothing waiting.'
+    }
+    case 'list':
+      return sharing ? listLinks($) : 'not sharing.'
+    case 'revoke': {
+      const m = rest[0] === 'read' || rest[0] === 'edit' ? rest[0] : undefined
+      const { revoked } = await bridgeCall<{ revoked: number }>($, '/revoke', { mode: m })
+      return `revoked ${revoked} link(s).`
+    }
+    case 'stop':
+      if (!sharing) return 'not sharing.'
+      await settle($, 'reject', true)
+      await bridgeCall($, '/stop').catch(() => {})
+      return 'stopped sharing. every viewer got kicked.'
+    default:
+      return USAGE
   }
-  if (sub === 'approve' || sub === 'reject') {
-    const n = await answer($, rest[0] === 'all' ? 'all' : 'first', sub === 'approve')
-    return n ? `${sub === 'approve' ? 'approved' : 'rejected'} ${n} guest message(s).` : 'nothing waiting.'
-  }
-  if (sub === 'list') {
-    const s = await read($, share)
-    if (!s.socket) return 'not sharing.'
-    const r = await $.http.fetch('http://bridge/links', { socketPath: s.socket })
-    const j = JSON.parse(r.text)
-    if (!j.links.length) return 'sharing, but no active links.'
-    return j.links
-      .map((l: any) => `${(l.mode === 'edit' ? `edit/${l.approve ? 'approve' : 'auto'}` : 'read').padEnd(12)}  until ${until(l.expires)}  ${l.url}`)
-      .join('\n')
-  }
-  if (sub === 'revoke') {
-    const m = rest[0] === 'read' || rest[0] === 'edit' ? rest[0] : undefined
-    const r = await bridgeCall($, '/revoke', { mode: m })
-    return `revoked ${r.revoked} link(s).`
-  }
-  if (sub === 'stop') {
-    const s = await read($, share)
-    if (!s.socket) return 'not sharing.'
-    await answer($, 'all', false)
-    await bridgeCall($, '/stop').catch(() => {})
-    return 'stopped sharing. every viewer got kicked.'
-  }
-  return USAGE
 }
 
 export const register: Register = on => {
@@ -240,17 +288,22 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const oneLine = first.text.replace(/\s+/g, ' ')
     const preview = oneLine.length > 160 ? `${oneLine.slice(0, 157)}…` : oneLine
+    const more = list.length > 1
     return (
       <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
         <Text>
-          <Text color="yellow" bold>sshare guest wants to send</Text>
-          {list.length > 1 ? <Text dimColor> (+{list.length - 1} more)</Text> : null}
+          <Text color="yellow" bold>
+            sshare guest wants to send
+          </Text>
+          {more ? <Text dimColor> (+{list.length - 1} more)</Text> : null}
         </Text>
         <Text>{preview}</Text>
         <Box gap={2}>
-          <Button key="approve" hotkey="y" label="approve" variant="primary" onPress={() => answer($, 'first', true)} />
-          <Button key="reject" hotkey="n" label="reject" onPress={() => answer($, 'first', false)} />
-          {list.length > 1 ? <Button key="approve-all" hotkey="a" label="approve all" onPress={() => answer($, 'all', true)} /> : null}
+          <Button key="approve" hotkey="y" label="approve" variant="primary" onPress={() => settle($, 'approve')} />
+          <Button key="reject" hotkey="n" label="reject" onPress={() => settle($, 'reject')} />
+          {more ? (
+            <Button key="approve-all" hotkey="a" label="approve all" onPress={() => settle($, 'approve', true)} />
+          ) : null}
           <Text dimColor>ctrl+x tab to focus · /sshare approve|reject [all]</Text>
         </Box>
       </Box>

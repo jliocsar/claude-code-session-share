@@ -22,6 +22,8 @@ Requirements: Claude Code running inside a [herdr](https://herdr.dev) pane, `bun
 ```
 
 From a shell: `claude plugin install sshare --marketplace jliocsar/claude-code-sshare`.
+
+
 ## How it works
 
 ```
@@ -38,3 +40,11 @@ Links look like `https://<relay>/s/<sid>#t=<token>`. The token is in the fragmen
 ## Security
 
 An edit link in auto mode lets whoever holds it prompt your session with its tool permissions. Keep approve mode unless you trust the person. Read links show whatever is on screen, secrets included.
+
+## Development
+
+```sh
+bun install && (cd relay && bun install)
+bun run check   # biome, tsc, plugin validate
+bun run test    # e2e against a local relay; run inside herdr
+```
