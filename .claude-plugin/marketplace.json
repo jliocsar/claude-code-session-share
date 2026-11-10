@@ -1,0 +1,5 @@
+{
+  "name": "claude-code-sshare",
+  "owner": { "name": "jliocsar" },
+  "plugins": [{ "name": "sshare", "source": "./plugin" }]
+}

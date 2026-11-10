@@ -1,0 +1,7 @@
+tmp/
+node_modules/
+.env
+.claude-plugin/types/
+plugin/.claude-plugin/types/
+*.log
+.DS_Store
