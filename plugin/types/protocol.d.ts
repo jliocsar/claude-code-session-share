@@ -12,7 +12,7 @@ export type Queued = { type: 'queued'; ok: boolean; pending?: boolean; why?: str
 
 /** Bridge stdout to the mod, one JSON object per line. */
 export type BridgeEvent =
-  | { type: 'ready'; sid: string; socket: string }
+  | { type: 'ready'; sid: string; socket: string; page: string }
   | { type: 'relay'; online: boolean }
   | { type: 'viewers'; read: number; edit: number }
   | { type: 'prompt'; text: string; viewer: string; approve: boolean }

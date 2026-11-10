@@ -5,7 +5,7 @@ import type { Pending, ShareState } from '../types'
 import type { BridgeEvent, LinkView } from '../types/protocol'
 
 const IDLE: ShareState = { read: 0, edit: 0, relay: false }
-const share = atom({ plugin: 'sshare', key: 'share' } as const, IDLE, { shape: 'share-1' })
+const share = atom({ plugin: 'sshare', key: 'share' } as const, IDLE, { shape: 'share-2' })
 const pending = atom({ plugin: 'sshare', key: 'pending' } as const, [] as Pending[], { shape: 'pending-1' })
 
 const MAX_PENDING = 20
@@ -55,6 +55,9 @@ function parseEvent(line: string): BridgeEvent | undefined {
     return undefined
   }
 }
+
+// Anything printed here is streamed to every viewer, so a link's token never goes on screen.
+const bare = (url: string) => url.replace(/#.*/, '')
 
 const until = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 const linkKind = (l: LinkView) => (l.mode === 'read' ? 'read' : `edit/${l.approve ? 'approve' : 'auto'}`)
@@ -174,7 +177,7 @@ async function runBridge($: EngineInterface, resolve: (socket: string) => void, 
         const ev = parseEvent(line)
         if (ev?.type === 'ready') {
           ready = true
-          await update($, share, () => ({ ...IDLE, socket: ev.socket, sid: ev.sid }))
+          await update($, share, () => ({ ...IDLE, socket: ev.socket, sid: ev.sid, page: ev.page }))
           resolve(ev.socket)
         } else if (ev?.type === 'fatal' && !ready) reject(new Error(ev.why))
         else if (ev) await onBridgeEvent($, ev)
@@ -218,7 +221,10 @@ async function shareLink(
   await ensureBridge($)
   const l = await bridgeCall<LinkView>($, '/link', { mode: sub, ttlMs, approve: mode !== 'auto' })
   await showStatus($, await read($, share))
-  const head = `${linkKind(l)} link (until ${until(l.expires)}):\n${l.url}`
+  const copied = (await $.ui.copy({ text: l.url })).isCopied
+  const head = copied
+    ? `${linkKind(l)} link copied to your clipboard (until ${until(l.expires)}). its token stays off screen:\n${bare(l.url)}`
+    : `${linkKind(l)} link (until ${until(l.expires)}). couldn't copy it, so here it is whole. anyone watching can see it:\n${l.url}`
   if (l.mode === 'read') return head
   if (l.approve)
     return `${head}\nguest messages wait for your ok: y/n on the band (ctrl+x tab) or /sshare approve|reject.`
@@ -228,7 +234,7 @@ async function shareLink(
 async function listLinks($: EngineInterface) {
   const { links } = await bridgeCall<{ links: LinkView[] }>($, '/links')
   if (!links.length) return 'sharing, but no active links.'
-  return links.map(l => `${linkKind(l).padEnd(12)}  until ${until(l.expires)}  ${l.url}`).join('\n')
+  return links.map(l => `${linkKind(l).padEnd(13)}  until ${until(l.expires)}  ${bare(l.url)}`).join('\n')
 }
 
 async function runCommand($: EngineInterface, args: string) {
@@ -284,8 +290,22 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const list = await read($, pending)
     const first = list[0]
-    if (!first || e.props.hasSurvey) return next(e)
+    if (e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
+    if (!first) {
+      const s = await read($, share)
+      if (!s.socket) return next(e)
+      const below = await next(e)
+      return (
+        <Box flexDirection="column">
+          {below}
+          <Text dimColor>
+            {statusText(s).replace('sshare', 'sharing session')}
+            {s.page ? ` · ${s.page.replace(/^https?:\/\//, '')}` : ''}
+          </Text>
+        </Box>
+      )
+    }
     const oneLine = first.text.replace(/\s+/g, ' ')
     const preview = oneLine.length > 160 ? `${oneLine.slice(0, 157)}…` : oneLine
     const more = list.length > 1

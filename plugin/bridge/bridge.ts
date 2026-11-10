@@ -236,4 +236,4 @@ process.on('SIGINT', stop)
 
 await watchSize()
 connect()
-emit({ type: 'ready', sid, socket: sock })
+emit({ type: 'ready', sid, socket: sock, page: `${RELAY}/s/${sid}` })

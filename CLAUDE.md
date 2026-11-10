@@ -10,7 +10,7 @@ herdr pane --observe--> bridge (local, bun) --wss--> relay (exe.dev VM) --wss-->
 ```
 
 - `plugin/`: the Claude Code mod (function hooks plugin).
-  - `hooks/register.tsx`: `/sshare` command, the approve band (`AbovePrompt`), status line, toasts. Spawns the bridge with `$.process.spawn` and reads its stdout.
+  - `hooks/register.tsx`: `/sshare` command, the `AbovePrompt` band (a dim "sharing session" line, or the approve prompt when a guest message waits), status line, toasts. Spawns the bridge with `$.process.spawn` and reads its stdout.
   - `bridge/bridge.ts`: a Bun process. Runs `herdr terminal session observe <pane>`, pushes frames to the relay, holds the link tokens, and serves a control API on a unix socket.
   - `types/index.d.ts`: the `$.state` contract (`sshare.share`, `sshare.pending`). The validator wants it self-contained, so it can't re-export anything.
   - `types/protocol.d.ts`: every wire message between the four pieces. The mod, the bridge, the relay and the test all `import type` from it. Type-only imports vanish at runtime, which is why the relay deploys without it.
@@ -74,6 +74,7 @@ Viewer and relay talk over `wss://<relay>/ws/view?sid=<sid>`.
   - a session is dropped 10 min after its host disconnects
 - TTL is clamped to between 1m and 7d. The default is 2h.
 - Edit links default to `--mode approve`: each guest message waits in a band above the prompt. Approve with `y`, reject with `n`, approve all with `a`, after ctrl+x tab focuses the band. `/sshare approve|reject [all]` does the same. `--mode auto` submits right away.
+- Link tokens never go on screen, since viewers watch it. `/sshare read|edit` copies the full link to the clipboard (`$.ui.copy`) and prints it without its `#t=` part. It prints it whole, with a warning, only when the copy fails. `/sshare list` and the band show token-free URLs.
 - Guest prompts go in framed as `[sshare guest via edit link]` (not `asUser`), so the model knows they didn't come from the owner.
 
 ## Infra

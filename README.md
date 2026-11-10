@@ -23,7 +23,6 @@ Requirements: Claude Code running inside a [herdr](https://herdr.dev) pane, `bun
 
 From a shell: `claude plugin install sshare --marketplace jliocsar/claude-code-sshare`.
 
-
 ## How it works
 
 ```
