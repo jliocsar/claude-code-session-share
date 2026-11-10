@@ -6,7 +6,7 @@ import { homedir } from 'node:os'
 import type { BridgeEvent, BridgeToRelay, LinkView, Mode, RelayToBridge } from '../types/protocol'
 
 const PANE = process.env.SESSION_SHARE_PANE ?? ''
-const RELAY = (process.env.SESSION_SHARE_RELAY ?? 'https://sshare.exe.xyz').replace(/\/$/, '')
+const RELAY = (process.env.SESSION_SHARE_RELAY ?? 'https://session-share.exe.xyz').replace(/\/$/, '')
 const SECRET_FILE = process.env.SESSION_SHARE_SECRET_FILE ?? `${homedir()}/.config/session-share/secret`
 
 // The mod accepts any `<n>m|h|d`; this is the one place a TTL gets clamped.

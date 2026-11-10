@@ -14,7 +14,7 @@ Share a live Claude Code TUI session as a web link. The page renders the real te
 Requirements: Claude Code running inside a [herdr](https://herdr.dev) pane, `bun` on PATH.
 
 1. Relay: put `relay/` on a host with a public HTTPS port, `bun install`, and run `bun server.ts` with `SESSION_SHARE_SECRET` (32+ chars) and optionally `PORT` (default 8000).
-2. Locally: write the same secret to `~/.config/session-share/secret` (chmod 600). Set `SESSION_SHARE_RELAY=https://your-relay` if it isn't the default `https://sshare.exe.xyz`.
+2. Locally: write the same secret to `~/.config/session-share/secret` (chmod 600). Set `SESSION_SHARE_RELAY=https://your-relay` if it isn't the default `https://session-share.exe.xyz`.
 3. Install the mod, at the prompt of a terminal session:
 
 ```

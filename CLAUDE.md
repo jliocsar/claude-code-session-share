@@ -62,7 +62,7 @@ Viewer and relay talk over `wss://<relay>/ws/view?sid=<sid>`.
 
 ## Security model
 
-- Links look like `https://sshare.exe.xyz/s/<sid>#t=<token>`.
+- Links look like `https://session-share.exe.xyz/s/<sid>#t=<token>`.
 - The token is 32 random bytes in the URL fragment, so it never reaches a server in a request line.
 - The page moves the token into `sessionStorage` and strips it from the address bar.
 - The relay stores only `sha256(token)`, and the mode and expiry are bound to the token on the server. A read token can never send prompts.
@@ -79,9 +79,9 @@ Viewer and relay talk over `wss://<relay>/ws/view?sid=<sid>`.
 
 ## Infra
 
-- Relay host: the exe.dev VM `sshare`, at https://sshare.exe.xyz, public proxy on port 8000. The host, VM and systemd unit kept the old name, so links already shared still work.
-  - The code lives in `~/relay` on the VM. `~/relay/.env` holds `SESSION_SHARE_SECRET` and `PORT`. Until the relay is redeployed after the rename, it still says `SSHARE_SECRET`: rename the key in the same deploy.
-  - It runs as the systemd unit `sshare-relay` with Bun at `~/.bun/bin/bun`.
+- Relay host: the exe.dev VM `session-share`, at https://session-share.exe.xyz, public proxy on port 8000.
+  - The code lives in `~/relay` on the VM. `~/relay/.env` holds `SESSION_SHARE_SECRET` and `PORT`.
+  - It runs as the systemd unit `session-share-relay` with Bun at `~/.bun/bin/bun`.
   - `/` answers `418 {"ok":"you're a teapot"}` on purpose.
 - Local secret: `~/.config/session-share/secret` (chmod 600). It must match the relay's `SESSION_SHARE_SECRET`. Never commit it.
 - `SESSION_SHARE_RELAY` overrides the default relay URL. `SESSION_SHARE_SECRET_FILE` overrides the secret path.
@@ -89,8 +89,8 @@ Viewer and relay talk over `wss://<relay>/ws/view?sid=<sid>`.
 Deploy the relay:
 
 ```sh
-cd relay && scp server.ts viewer.html viewer.js sshare.exe.xyz:relay/ \
-  && ssh sshare.exe.xyz 'sudo systemctl restart sshare-relay && systemctl is-active sshare-relay'
+cd relay && scp server.ts viewer.html viewer.js session-share.exe.xyz:relay/ \
+  && ssh session-share.exe.xyz 'sudo systemctl restart session-share-relay && systemctl is-active session-share-relay'
 ```
 
 If `package.json` changed, run `~/.bun/bin/bun install` in `~/relay` on the VM.
