@@ -14,7 +14,7 @@ herdr pane --observe--> bridge (local, bun) --wss--> relay (exe.dev VM) --wss-->
   - `bridge/bridge.ts`: a Bun process. Runs `herdr terminal session observe <pane>`, pushes frames to the relay, holds the link tokens, and serves a control API on a unix socket.
   - `types/index.d.ts`: the `$.state` contract (`session-share.share`, `session-share.pending`). The validator wants it self-contained, so it can't re-export anything.
   - `types/protocol.d.ts`: every wire message between the four pieces. The mod, the bridge, the relay and the test all `import type` from it. Type-only imports vanish at runtime, which is why the relay deploys without it.
-- `relay/`: a Bun server (`server.ts`) plus the viewer page (`viewer.html` + `viewer.js`). Serves ghostty-web from `node_modules/ghostty-web/dist` under `/vendor/`. The wasm is inlined in the JS. The page has no inline script, so the CSP has no `'unsafe-inline'` for scripts.
+- `relay/`: a Bun server (`server.ts`) plus the viewer page (`viewer.html`, `viewer.js`, `viewer.css`). Serves ghostty-web from `node_modules/ghostty-web/dist` under `/vendor/`. The wasm is inlined in the JS. Its components come from oat (`@knadh/oat`), served as `/vendor/oat.min.css`. `viewer.css` only sets the theme variables and the layout. The page has no inline script or style, so the CSP has no `'unsafe-inline'`.
 - `test/e2e.ts`: end-to-end test. Starts a local relay on a random port with a throwaway secret, runs the real bridge on the current herdr pane, and drives fake viewers.
 - `.claude-plugin/marketplace.json`: makes the repo installable with `/plugin install session-share --marketplace jliocsar/claude-code-session-share`.
 - Root `package.json`: dev tooling only (biome, typescript, `@types/bun`). `relay/package.json` is what the VM installs.
@@ -89,7 +89,7 @@ Viewer and relay talk over `wss://<relay>/ws/view?sid=<sid>`.
 Deploy the relay:
 
 ```sh
-cd relay && scp server.ts viewer.html viewer.js session-share.exe.xyz:relay/ \
+cd relay && scp server.ts viewer.html viewer.js viewer.css package.json bun.lock session-share.exe.xyz:relay/ \
   && ssh session-share.exe.xyz 'sudo systemctl restart session-share-relay && systemctl is-active session-share-relay'
 ```
 

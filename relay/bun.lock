@@ -5,11 +5,14 @@
     "": {
       "name": "session-share-relay",
       "dependencies": {
+        "@knadh/oat": "1.1.0",
         "ghostty-web": "0.4.0",
       },
     },
   },
   "packages": {
+    "@knadh/oat": ["@knadh/oat@1.1.0", "", {}, "sha512-6nYrV+a5qiLmcyUeQmvbs6xNECaqRI37x9Ds9K8SN5jgKvJxFL+AlZQDHLELtdtp1wD1pUul29XNv8GI69gzUw=="],
+
     "ghostty-web": ["ghostty-web@0.4.0", "", {}, "sha512-0puDBik2qapbD/QQBW9o5ZHfXnZBqZWx/ctBiVtKZ6ZLds4NYb+wZuw1cRLXZk9zYovIQ908z3rvFhexAvc5Hg=="],
   }
 }

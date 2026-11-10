@@ -8,9 +8,11 @@ const SECRET = process.env.SESSION_SHARE_SECRET ?? ''
 if (SECRET.length < 32) throw new Error('SESSION_SHARE_SECRET missing or too short')
 const PORT = Number(process.env.PORT ?? 8000)
 const DIST = new URL('./node_modules/ghostty-web/dist/', import.meta.url).pathname
+const OAT_CSS = new URL('./node_modules/@knadh/oat/oat.min.css', import.meta.url).pathname
 const PAGES: Record<string, { file: string; type: string }> = {
   html: { file: new URL('./viewer.html', import.meta.url).pathname, type: 'text/html; charset=utf-8' },
   js: { file: new URL('./viewer.js', import.meta.url).pathname, type: 'text/javascript; charset=utf-8' },
+  css: { file: new URL('./viewer.css', import.meta.url).pathname, type: 'text/css; charset=utf-8' },
 }
 const HOST_GRACE_MS = 10 * 60_000
 const AUTH_MS = 5000
@@ -179,13 +181,13 @@ setInterval(() => {
 
 const SEC_HEADERS = {
   'content-security-policy':
-    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' data:; img-src 'self' data:",
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self' data:; img-src 'self' data:",
   'referrer-policy': 'no-referrer',
   'x-frame-options': 'DENY',
   'cache-control': 'no-store',
 }
 
-function page(kind: 'html' | 'js') {
+function page(kind: 'html' | 'js' | 'css') {
   const p = PAGES[kind]
   if (!p) return new Response('not found\n', { status: 404 })
   return new Response(Bun.file(p.file), { headers: { ...SEC_HEADERS, 'content-type': p.type } })
@@ -208,9 +210,10 @@ Bun.serve({
     }
     if (/^\/s\/[A-Za-z0-9_-]{8,32}\/?$/.test(url.pathname)) return page('html')
     if (url.pathname === '/viewer.js') return page('js')
-    const vendor = url.pathname.match(/^\/vendor\/([\w.-]+\.(js|wasm))$/)
+    if (url.pathname === '/viewer.css') return page('css')
+    const vendor = url.pathname.match(/^\/vendor\/([\w.-]+\.(js|wasm|css))$/)
     if (vendor) {
-      const f = Bun.file(DIST + vendor[1])
+      const f = Bun.file(vendor[1] === 'oat.min.css' ? OAT_CSS : DIST + vendor[1])
       if (await f.exists()) return new Response(f, { headers: { 'cache-control': 'public, max-age=86400' } })
     }
     if (url.pathname === '/') return Response.json({ ok: "you're a teapot" }, { status: 418 })

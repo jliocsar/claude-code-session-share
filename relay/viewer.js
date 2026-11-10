@@ -17,9 +17,13 @@ function overlay(text) {
   $('overlay').classList.toggle('show', !!text)
 }
 
+const VARIANT = { live: 'success', off: 'danger' }
+
 function badge(text, cls = '') {
   $('badge-text').textContent = text
-  $('badge').className = cls
+  const variant = VARIANT[cls]
+  if (variant) $('badge').dataset.variant = variant
+  else delete $('badge').dataset.variant
 }
 
 function note(text, cls = '') {

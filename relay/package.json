@@ -6,6 +6,7 @@
     "start": "bun server.ts"
   },
   "dependencies": {
+    "@knadh/oat": "1.1.0",
     "ghostty-web": "0.4.0"
   }
 }

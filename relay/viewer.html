@@ -5,39 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>session-share</title>
-<style>
-  :root { --bg: #16161e; --fg: #c0caf5; --dim: #565f89; --acc: #7aa2f7; --ok: #9ece6a; --bad: #f7768e; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 13px/1.4 ui-monospace, 'JetBrains Mono', monospace; overflow: hidden; }
-  #stage { position: fixed; inset: 0; }
-  #term { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-  #badge { position: fixed; top: 10px; right: 12px; padding: 4px 10px; border-radius: 999px; background: #1f2335ee; border: 1px solid #292e42; font-size: 12px; z-index: 5; user-select: none; }
-  #badge .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); margin-right: 6px; vertical-align: 1px; }
-  #badge.live .dot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
-  #badge.off .dot { background: var(--bad); }
-  #overlay { position: fixed; inset: 0; display: none; place-items: center; background: #16161ecc; z-index: 10; font-size: 15px; text-align: center; padding: 24px; }
-  #overlay.show { display: grid; }
-  #ask { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); width: min(720px, calc(100vw - 24px)); display: none; z-index: 6;
-         background: #1f2335f2; border: 1px solid #3b4261; border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 40px #0009; backdrop-filter: blur(6px); }
-  #ask.show { display: block; }
-  #ask textarea { width: 100%; min-height: 44px; max-height: 40vh; resize: vertical; background: transparent; color: var(--fg); border: 0; outline: 0; font: inherit; }
-  #ask .row { display: flex; justify-content: space-between; align-items: center; color: var(--dim); font-size: 11px; margin-top: 4px; }
-  #ask .head { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; margin-bottom: 4px; cursor: pointer; user-select: none; }
-  #ask button { background: var(--acc); color: #16161e; border: 0; border-radius: 6px; padding: 4px 12px; font: inherit; font-weight: 600; cursor: pointer; }
-  #ask button:disabled { opacity: .5; cursor: default; }
-  #ask.min textarea, #ask.min .row { display: none; }
-  #msg.ok { color: var(--ok); } #msg.bad { color: var(--bad); }
-</style>
+<link rel="stylesheet" href="/vendor/oat.min.css">
+<link rel="stylesheet" href="/viewer.css">
 </head>
 <body>
 <div id="stage"><div id="term"></div></div>
-<div id="badge"><span class="dot"></span><span id="badge-text">connecting…</span></div>
-<div id="overlay"><div id="overlay-text"></div></div>
-<div id="ask">
-  <div class="head" id="ask-head"><span>send a message to the session</span><span id="ask-toggle">hide</span></div>
+<span id="badge" class="badge outline"><span class="dot"></span><span id="badge-text">connecting…</span></span>
+<div id="overlay"><article class="card" id="overlay-text"></article></div>
+<article id="ask" class="card">
+  <header class="flex justify-between text-light" id="ask-head"><small>send a message to the session</small><small id="ask-toggle">hide</small></header>
   <textarea id="ask-text" placeholder="type a prompt… (enter sends, shift+enter newline)" maxlength="8000"></textarea>
-  <div class="row"><span id="msg">queued if the agent is busy</span><button type="button" id="ask-send">send</button></div>
-</div>
+  <footer class="flex justify-between items-center mt-2"><small id="msg">queued if the agent is busy</small><button type="button" class="small" id="ask-send">send</button></footer>
+</article>
 <script type="module" src="/viewer.js"></script>
 </body>
 </html>
