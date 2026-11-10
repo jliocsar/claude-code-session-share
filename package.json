@@ -3,15 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "biome check .",
-    "fix": "biome check --write .",
-    "typecheck": "tsc -p . && tsc -p plugin",
+    "lint": "bunx --bun oxlint --deny-warnings && oxfmt --check",
+    "fix": "bunx --bun oxlint --fix && oxfmt",
+    "typecheck": "tsc -p . && tsc -p tsconfig.viewer.json && tsc -p plugin",
     "check": "bun run lint && bun run typecheck && claude plugin validate plugin",
     "test": "bun test/e2e.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.6",
+    "@jliocsar/begone-slop": "0.2.12",
     "@types/bun": "1.4.4",
+    "oxfmt": "0.62.0",
+    "oxlint": "1.91.0",
     "typescript": "7.0.2"
   }
 }

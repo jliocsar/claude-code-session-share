@@ -1,22 +1,33 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<title>session-share</title>
-<link rel="stylesheet" href="/vendor/oat.min.css">
-<link rel="stylesheet" href="/viewer.css">
-</head>
-<body>
-<div id="stage"><div id="term"></div></div>
-<span id="badge" class="badge outline"><span class="dot"></span><span id="badge-text">connecting…</span></span>
-<div id="overlay"><article class="card" id="overlay-text"></article></div>
-<article id="ask" class="card">
-  <header class="flex justify-between text-light" id="ask-head"><small>send a message to the session</small><small id="ask-toggle">hide</small></header>
-  <textarea id="ask-text" placeholder="type a prompt… (enter sends, shift+enter newline)" maxlength="8000"></textarea>
-  <footer class="flex justify-between items-center mt-2"><small id="msg">queued if the agent is busy</small><button type="button" class="small" id="ask-send">send</button></footer>
-</article>
-<script type="module" src="/viewer.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>session-share</title>
+    <link rel="stylesheet" href="/vendor/oat.min.css" />
+    <link rel="stylesheet" href="/viewer.css" />
+  </head>
+  <body>
+    <div id="stage"><div id="term"></div></div>
+    <span id="badge" class="badge outline"
+      ><span class="dot"></span><span id="badge-text">connecting…</span></span
+    >
+    <div id="overlay"><article class="card" id="overlay-text"></article></div>
+    <article id="ask" class="card">
+      <header class="flex justify-between text-light" id="ask-head">
+        <small>send a message to the session</small><small id="ask-toggle">hide</small>
+      </header>
+      <textarea
+        id="ask-text"
+        placeholder="type a prompt… (enter sends, shift+enter newline)"
+        maxlength="8000"
+      ></textarea>
+      <footer class="flex justify-between items-center mt-2">
+        <small id="msg">queued if the agent is busy</small
+        ><button type="button" class="small" id="ask-send">send</button>
+      </footer>
+    </article>
+    <script type="module" src="/viewer.js"></script>
+  </body>
 </html>

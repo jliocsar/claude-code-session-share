@@ -44,6 +44,6 @@ An edit link in auto mode lets whoever holds it prompt your session with its too
 
 ```sh
 bun install && (cd relay && bun install)
-bun run check   # biome, tsc, plugin validate
+bun run check   # oxlint (begone-slop preset), oxfmt, tsc, plugin validate
 bun run test    # e2e against a local relay; run inside herdr
 ```

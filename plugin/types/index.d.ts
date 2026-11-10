@@ -1,10 +1,9 @@
 export type Pending = { id: string; text: string; viewer: string }
 
 export type ShareState = {
-  socket?: string
-  sid?: string
+  socket: string | null
   /** the share's page without a token: safe to draw, since viewers see this screen */
-  page?: string
+  page: string | null
   read: number
   edit: number
   relay: boolean

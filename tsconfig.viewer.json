@@ -1,0 +1,10 @@
+{
+  "extends": "@jliocsar/begone-slop/tsconfig",
+
+  "include": ["relay/viewer.ts", "plugin/types/protocol.d.ts"],
+
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": []
+  }
+}

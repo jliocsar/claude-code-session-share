@@ -1,24 +1,5 @@
-/* oat does the components; this file is the tokyo night theme plus the page layout. */
 :root {
   color-scheme: dark;
-  --background: #16161e;
-  --foreground: #c0caf5;
-  --card: #1f2335;
-  --card-foreground: #c0caf5;
-  --primary: #7aa2f7;
-  --primary-foreground: #16161e;
-  --secondary: #292e42;
-  --secondary-foreground: #c0caf5;
-  --muted: #292e42;
-  --muted-foreground: #565f89;
-  --accent: #292e42;
-  --border: #3b4261;
-  --input: #3b4261;
-  --ring: #7aa2f7;
-  --success: #9ece6a;
-  --danger: #f7768e;
-  --font-sans: "JetBrains Mono", ui-monospace, monospace;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
 html,
@@ -26,10 +7,12 @@ body {
   height: 100%;
   overflow: hidden;
 }
+
 #stage {
   position: fixed;
   inset: 0;
 }
+
 #term {
   position: absolute;
   left: 0;
@@ -43,16 +26,14 @@ body {
   right: var(--space-3);
   z-index: 5;
   user-select: none;
-  background: var(--card);
+  background-color: var(--card);
 }
+
 #badge .dot {
   width: 8px;
   height: 8px;
   border-radius: var(--radius-full);
-  background: currentColor;
-}
-#badge[data-variant="success"] .dot {
-  box-shadow: 0 0 6px currentColor;
+  background-color: currentColor;
 }
 
 #overlay {
@@ -62,9 +43,10 @@ body {
   place-items: center;
   padding: var(--space-6);
   z-index: 10;
-  background: rgb(from var(--background) r g b / 0.8);
+  background-color: rgb(from var(--background) r g b / 0.8);
   text-align: center;
 }
+
 #overlay.show {
   display: grid;
 }
@@ -74,35 +56,40 @@ body {
   left: 50%;
   bottom: var(--space-4);
   transform: translateX(-50%);
-  width: min(720px, calc(100vw - 24px));
+  width: min(720px, calc(100vw - var(--space-6)));
   display: none;
   z-index: 6;
   padding: var(--space-3);
   box-shadow: var(--shadow-large);
-  background: rgb(from var(--card) r g b / 0.95);
-  backdrop-filter: blur(6px);
 }
+
 #ask.show {
   display: block;
 }
+
 #ask-head {
   cursor: pointer;
   user-select: none;
 }
+
 #ask textarea {
   min-height: 3rem;
   max-height: 40vh;
 }
+
 #ask.min textarea,
 #ask.min footer {
   display: none;
 }
+
 #msg {
   color: var(--muted-foreground);
 }
+
 #msg.ok {
   color: var(--success);
 }
+
 #msg.bad {
   color: var(--danger);
 }
