@@ -34,8 +34,7 @@ Requirements: Claude Code running inside a [herdr](https://herdr.dev) pane, `bun
 /plugin install sshare --marketplace jliocsar/claude-code-sshare
 ```
 
-From a shell: `claude plugin install sshare --marketplace jliocsar/claude-code-sshare`. This repository is private: installing needs read access on GitHub and a git credential for github.com on that machine (an SSH key, or `gh auth login` then `gh auth setup-git`).
-
+From a shell: `claude plugin install sshare --marketplace jliocsar/claude-code-sshare`.
 ## Security
 
 An edit link in auto mode lets whoever holds it prompt your session with its tool permissions. Keep approve mode unless you trust the person. Read links show whatever is on screen, secrets included.
