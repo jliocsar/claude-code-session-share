@@ -121,4 +121,3 @@ If `package.json` changed, run `~/.bun/bin/bun install` in `~/relay` on the VM.
 - The approve band hasn't been seen live yet. `/sshare edit` in auto mode was verified end to end.
 - The viewer scales the terminal to fit and doesn't reflow it. On small screens the text gets tiny.
 - Relay sessions are in memory only.
-- There's no LICENSE yet.
